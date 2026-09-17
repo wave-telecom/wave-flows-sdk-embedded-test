@@ -1,0 +1,15 @@
+{
+  "name": "sdk-embedded",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Host de demonstração do Wave Embed SDK — página estática que implementa o lado host do contrato (wave:ready / wave:auth / wave:resize).",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "serve": "node server.js"
+  }
+}

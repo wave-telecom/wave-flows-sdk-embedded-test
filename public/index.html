@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Host de teste — Wave Embed</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0;
+        padding: 24px;
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: #2a3948;
+        background: #f4f6f8;
+      }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p.lead { margin: 0 0 20px; color: #56616e; }
+      fieldset {
+        border: 1px solid #d4d9e0; border-radius: 10px; background: #fff;
+        margin: 0 0 16px; padding: 16px;
+      }
+      legend { padding: 0 6px; font-size: 12px; color: #56616e; }
+      .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+      label { display: grid; gap: 4px; font-size: 12px; color: #56616e; }
+      input, select { padding: 7px 9px; border: 1px solid #d4d9e0; border-radius: 6px; font: inherit; color: #2a3948; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+      button {
+        padding: 7px 12px; border-radius: 6px; border: 1px solid #d4d9e0;
+        background: #fff; color: #2a3948; cursor: pointer; font: inherit;
+      }
+      button[data-active="true"] { background: #2a3948; color: #fff; border-color: #2a3948; }
+      button.primary { background: #0b63ce; color: #fff; border-color: #0b63ce; }
+      .stage { display: grid; gap: 16px; grid-template-columns: auto minmax(280px, 1fr); align-items: start; }
+      .container {
+        border: 1px dashed #b9c1cb; border-radius: 12px; background: #fff;
+        overflow: hidden; position: relative;
+      }
+      .container::before {
+        content: attr(data-width) "px"; position: absolute; top: 4px; right: 6px;
+        font: 10px ui-monospace, Menlo, monospace; color: #8a94a0; z-index: 1;
+      }
+      iframe { width: 100%; border: 0; display: block; }
+      .log { font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; display: grid; gap: 2px; }
+      .log .in { color: #0b63ce; }
+      .log .out { color: #1f8a4c; }
+      .log .warn { color: #b4471f; }
+      .empty { color: #8a94a0; }
+      @media (max-width: 760px) { .stage { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <h1>Host de teste — Wave Embed</h1>
+    <p class="lead">
+      Página estática, sem build. Implementa o lado host do contrato:
+      responde <code>wave:ready</code> com <code>wave:auth</code> e
+      redimensiona o iframe com <code>wave:resize</code>. Servida em uma porta
+      diferente da do frame, de propósito — é o único jeito de exercitar
+      <code>frame-ancestors</code> e a validação de <code>event.origin</code>.
+    </p>
+
+    <fieldset>
+      <legend>Frame</legend>
+      <div class="grid">
+        <label>Origem do frame
+          <input id="frameOrigin" value="http://localhost:3000" />
+        </label>
+        <label>tipo
+          <select id="kind">
+            <option value="component">component</option>
+            <option value="flow">flow</option>
+          </select>
+        </label>
+        <label>id (componentId ou flowId)
+          <input id="targetId" value="balance-summary" />
+        </label>
+        <label>channelId
+          <input id="channelId" value="local" />
+        </label>
+        <label>lang
+          <input id="lang" value="es-MX" />
+        </label>
+        <label>theme
+          <select id="theme">
+            <option value="auto">auto</option>
+            <option value="light">light</option>
+            <option value="dark">dark</option>
+          </select>
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Credencial entregue por wave:auth</legend>
+      <div class="grid">
+        <label>accessToken
+          <input id="accessToken" placeholder="token do BFF (sandbox)" />
+        </label>
+        <label>externalCode
+          <input id="externalCode" value="525530188033" />
+        </label>
+      </div>
+      <p style="margin: 12px 0 0; font-size: 12px; color: #56616e">
+        Fica só em memória e no <code>localStorage</code> desta página de teste.
+        Nunca vai para a URL do frame.
+      </p>
+    </fieldset>
+
+    <div class="row">
+      <span style="font-size: 12px; color: #56616e">Largura do container:</span>
+      <button data-width="280">280</button>
+      <button data-width="320">320</button>
+      <button data-width="360">360</button>
+      <button data-width="400">400</button>
+      <button data-width="480">480</button>
+      <button id="load" class="primary">Carregar frame</button>
+      <button id="reauth">Reenviar wave:auth</button>
+      <button id="stop">Parar</button>
+    </div>
+
+    <div class="stage" style="margin-top: 16px">
+      <div class="container" id="container" data-width="320" style="width: 320px">
+        <div id="placeholder" style="padding: 16px; font-size: 12px; color: #8a94a0">
+          Frame parado.
+        </div>
+      </div>
+      <div>
+        <strong style="font-size: 12px">Eventos</strong>
+        <div class="log" id="log"><span class="empty">nada ainda</span></div>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id)
+      const fields = ['frameOrigin', 'kind', 'targetId', 'channelId', 'lang', 'theme', 'accessToken', 'externalCode']
+
+      // Conveniência da página de teste: evita redigitar o token a cada reload.
+      for (const id of fields) {
+        const saved = localStorage.getItem('wave-host:' + id)
+        if (saved !== null) $(id).value = saved
+        $(id).addEventListener('change', () => localStorage.setItem('wave-host:' + id, $(id).value))
+      }
+
+      const log = (kind, text) => {
+        const el = $('log')
+        if (el.querySelector('.empty')) el.textContent = ''
+        const line = document.createElement('div')
+        line.className = kind
+        const arrow = kind === 'in' ? '<-' : kind === 'out' ? '->' : '!!'
+        line.textContent = new Date().toISOString().slice(11, 23) + ' ' + arrow + ' ' + text
+        el.prepend(line)
+      }
+
+      let frame = null
+
+      const frameOrigin = () => $('frameOrigin').value.replace(/\/$/, '')
+
+      const credentials = () => ({
+        accessToken: $('accessToken').value.trim(),
+        externalCode: $('externalCode').value.trim(),
+      })
+
+      function sendAuth() {
+        if (!frame || !frame.contentWindow) return log('warn', 'nenhum frame carregado')
+
+        const payload = credentials()
+
+        frame.contentWindow.postMessage(
+          {
+            protocol: 'wave-embed',
+            version: 1,
+            direction: 'host->frame',
+            type: 'wave:auth',
+            payload,
+          },
+          // Sempre a origem exata. Nunca '*': com '*' o token sairia para
+          // qualquer documento que estivesse ocupando o frame.
+          frameOrigin()
+        )
+
+        log('out', 'wave:auth ' + JSON.stringify({
+          accessToken: payload.accessToken ? payload.accessToken.slice(0, 6) + '…' : '(vazio)',
+          externalCode: payload.externalCode,
+        }))
+      }
+
+      window.addEventListener('message', (event) => {
+        // Sem esta checagem, qualquer página conseguiria se passar pelo frame.
+        if (event.origin !== frameOrigin()) return
+
+        const data = event.data
+        if (!data || data.protocol !== 'wave-embed') return
+        if (data.direction !== 'frame->host') return
+
+        log('in', data.type + ' ' + JSON.stringify(data.payload ?? {}))
+
+        switch (data.type) {
+          case 'wave:ready':
+            sendAuth()
+            break
+
+          case 'wave:resize':
+          case 'wave:loaded':
+            if (data.payload && data.payload.height > 0) {
+              frame.style.height = data.payload.height + 'px'
+            }
+            break
+
+          case 'wave:navigate':
+            log('warn', 'o host decide o que fazer com esta navegação')
+            break
+
+          case 'wave:close':
+            stop()
+            break
+        }
+      })
+
+      function load() {
+        stop()
+        $('log').innerHTML = '<span class="empty">nada ainda</span>'
+
+        const params = new URLSearchParams({
+          channelId: $('channelId').value.trim(),
+          lang: $('lang').value.trim(),
+          theme: $('theme').value,
+        })
+
+        const id = encodeURIComponent($('targetId').value.trim())
+        const path = $('kind').value === 'flow' ? '/embed/flow/' + id : '/embed/' + id
+        const src = frameOrigin() + path + '?' + params
+
+        frame = document.createElement('iframe')
+        frame.src = src
+        frame.title = 'Wave embed'
+        frame.style.height = '240px'
+
+        $('placeholder').style.display = 'none'
+        $('container').appendChild(frame)
+
+        log('out', 'iframe src=' + src)
+      }
+
+      function stop() {
+        if (frame) frame.remove()
+        frame = null
+        $('placeholder').style.display = ''
+      }
+
+      for (const button of document.querySelectorAll('[data-width]')) {
+        button.addEventListener('click', () => {
+          const width = button.dataset.width
+          $('container').style.width = width + 'px'
+          $('container').dataset.width = width
+          for (const other of document.querySelectorAll('[data-width]')) {
+            other.dataset.active = String(other === button)
+          }
+        })
+      }
+
+      $('load').addEventListener('click', load)
+      $('stop').addEventListener('click', stop)
+      $('reauth').addEventListener('click', sendAuth)
+    </script>
+  </body>
+</html>
